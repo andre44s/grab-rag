@@ -1,0 +1,8 @@
+name: grab-rag
+channels:
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - cuda-cudart>=12,<13
