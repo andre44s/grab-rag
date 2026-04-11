@@ -7,7 +7,7 @@ from pathlib import Path
 from datasets import load_dataset
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.normalize import contains_answer
+from src.utils import contains_answer
 
 seed = 42
 n_eval=500
