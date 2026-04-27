@@ -57,7 +57,24 @@ institutional_org_suffixes = frozenset({
     "agency", "bureau", "ministry", "department",
     "administration", "authority", "commission", "committee",
     "council", "parliament",
+    "association", "federation",
+    "pictures", "films", "studios", "entertainment", "productions",
+    "forces", "company",
+    "companies", "corporation", "bank",
 })
+geographic_body_words = frozenset({
+    "sea", "ocean", "river", "lake", "bay", "gulf", "strait", "sound",
+    "creek", "brook", "canal", "reservoir", "inlet", "fjord",
+    "mountain", "mountains", "range", "valley", "plateau", "desert",
+    "glacier", "peninsula", "island", "islands", "archipelago",
+    "coast", "cape", "ridge", "peak", "hills", "highlands",
+})
+media_org_words = frozenset({
+    "tribune", "herald", "gazette", "journal", "dispatch",
+    "chronicle", "courier", "sentinel", "bulletin", "observer",
+    "examiner", "register", "times",
+})
+educational_words = frozenset({"college", "university", "institute", "school", "academy"})
 
 def is_valid_pool_entity(text):
     if len(text) < 3:
@@ -74,6 +91,12 @@ def is_valid_pool_entity(text):
             if words[i].lower() == words[i + 1].lower():
                 return False
     if all(w.islower() for w in words):
+        return False
+    #skip geographic features
+    if words[-1].lower() in geographic_body_words:
+        return False
+    #skip -born compounds
+    if any(w.lower().endswith("-born") for w in words):
         return False
     return True
 
@@ -92,19 +115,26 @@ def is_clean_pool_entry(text, label):
     if label == "ORG":
         if len(words) == 1 and low in generic_org:
             return False
+        subwords = [sw.lower() for w in words for sw in re.split(r"[-]", w)]
+        if any(sw in media_org_words for sw in subwords):
+            return False
     if label == "EVENT":
         if len(words) == 1 and low in generic_event:
             return False
     if label == "WORK_OF_ART":
         if any(low.startswith(p) for p in ("the ", "a ", "an ")):
             remainder = re.sub(r"^(the|a|an)\s+", "", text, flags=re.IGNORECASE).strip()
-            if remainder and remainder.split()[0][0].islower():
+            #block only if ALL remaining words are lowercase (not a title)
+            if remainder and all(w[0].islower() for w in remainder.split()):
                 return False
     if label == "LOC":
         if len(words) == 1 and first_low in loc_directional_prefixes:
             return False
         if first_low in loc_directional_prefixes and words[0][0].islower():
             return False
+    #skip domain names
+    if re.search(r'[a-z]\.[a-z]{2,4}(?:\s|$)', text):
+        return False
     return True
 
 def is_clean_swap(original, replacement):
@@ -129,10 +159,21 @@ def is_clean_swap(original, replacement):
     if repl_words and orig_words:
         if repl_words[-1].lower() in institutional_org_suffixes and orig_words[-1].lower() not in institutional_org_suffixes:
             return False
+    #edu type must match
+    orig_has_edu = any(w.lower() in educational_words for w in orig_words)
+    repl_has_edu = any(w.lower() in educational_words for w in repl_words)
+    if orig_has_edu != repl_has_edu:
+        return False
+    #truncated initials
+    if re.search(r'\b[A-Z]\.$', replacement.strip()):
+        return False
+    #skip acronyms
+    if len(repl_words) == 1 and replacement.isupper() and len(replacement) >= 2:
+        return False
     return True
 
 def is_alias_overlap(a, b):
-    #true if one is a token-subset of the other (catches "Trump" vs "Donald Trump")
+    #token-subset match
     a_toks = set(normalize(a).split())
     b_toks = set(normalize(b).split())
     if not a_toks or not b_toks:
@@ -202,7 +243,7 @@ class ContradictoryGenerator:
         return gen
 
     def deduplicate_pool(self):
-        #remove demonyms from gpe/loc that exist in norp
+        #dedupe norp from gpe/loc
         norp_set = {e.lower() for e in self.pool.get("NORP", [])}
         for label in ("GPE", "LOC"):
             if label in self.pool:
@@ -256,23 +297,32 @@ class ContradictoryGenerator:
 
     def pick_alt(self, entity_text, entity_label, rng):
         alts = [e for e in self.pool.get(entity_label, []) if normalize(e) != normalize(entity_text) and not is_alias_overlap(e, entity_text)]
-        #prefer similar word count
         orig_wc=len(entity_text.split())
         galts = [e for e in alts if abs(len(e.split()) - orig_wc) <= max(2, orig_wc)]
         if galts:
             alts = galts
+        #3+ token orig needs multi-word repl
+        if orig_wc >= 3:
+            multi_alts = [e for e in alts if len(e.split()) >= 2]
+            if multi_alts:
+                alts = multi_alts
         if not alts:
             return None
         return rng.choice(alts)
 
     def scrub_other_answers(self, text, answers, primary_answer, replacement):
-        #replace other aliases to prevent leaks
         result = text
         for a in answers:
             a_stripped = a.strip()
             if not a_stripped:
                 continue
             if normalize(a_stripped) == normalize(primary_answer):
+                continue
+            #skip numeric aliases
+            if year_re.fullmatch(a_stripped) or num_re.fullmatch(a_stripped):
+                continue
+            #skip unrelated aliases
+            if not is_alias_overlap(a_stripped, primary_answer):
                 continue
             if re.search(r"\b" + re.escape(a_stripped) + r"\b", result, re.IGNORECASE):
                 result = replace_all(result, a_stripped, replacement)
@@ -284,6 +334,21 @@ class ContradictoryGenerator:
             return text, False, None
         raw, start, end = span
         raws=raw.strip()
+
+        #skip born-name leaks
+        born_m = re.search(r'\(born\s+([^;)]+)', text, re.IGNORECASE)
+        if born_m:
+            born_text = born_m.group(1).strip()
+            born_toks = set(normalize(born_text).split())
+            for a in answers:
+                a_toks = set(normalize(a.strip()).split())
+                if a_toks and a_toks & born_toks:
+                    return text, False, None
+        #skip possessive leaks
+        for a in answers:
+            for tok in normalize(a.strip()).split():
+                if len(tok) >= 6 and re.search(r'\b' + re.escape(tok) + r"'s\b", text, re.IGNORECASE):
+                    return text, False, None
 
         result = None
         replacement = None
@@ -331,19 +396,48 @@ class ContradictoryGenerator:
                 if ent["start"] <= start and ent["end"] >= end:
                     ent_lbl = gliner_label_map.get(ent["label"])
                     break
+            #fallback: answer contains entity span (short answers only)
+            if ent_lbl is None:
+                ans_words = raws.split()
+                if len(ans_words) <= 5:
+                    for ent in ents:
+                        if start <= ent["start"] and ent["end"] <= end:
+                            lbl = gliner_label_map.get(ent["label"])
+                            if lbl:
+                                ent_lbl = lbl
+                                break
             if ent_lbl:
-                alt = self.pick_alt(raw, ent_lbl, rng)
+                #prefer norp for nationalities
+                norp_pool_lower = {e.lower() for e in self.pool.get("NORP", [])}
+                low_raws = raws.lower()
+                if low_raws in norp_pool_lower:
+                    pick_lbl = "NORP"
+                #single-word adj ending in nat suffix, use norp pool
+                elif (self.pool.get("NORP") and len(raws.split()) == 1
+                        and any(low_raws.endswith(s) for s in ("ian", "ish", "ese"))):
+                    pick_lbl = "NORP"
+                else:
+                    pick_lbl = ent_lbl
+                alt = self.pick_alt(raw, pick_lbl, rng)
+                #single-word nat. needs single-word repl
+                if alt and pick_lbl == "NORP" and len(raws.split()) == 1 and len(alt.split()) > 1:
+                    alt = None
+                if alt is None and pick_lbl != ent_lbl:
+                    alt = self.pick_alt(raw, ent_lbl, rng)
                 if alt:
                     replacement = alt
                     result = replace_all(text, raws, alt)
 
-        #tier 4, sub-entity from answer
+        #tier 4, cross-validated sub-entity
         if result is None:
+            passage_ent_texts = {e["text"].lower() for e in ents}
             ans_ents = self.nlp.predict_entities(raws, gliner_labels, threshold=0.5)
             for sub_ent in ans_ents:
                 sub_text = sub_ent["text"]
                 sub_label = gliner_label_map.get(sub_ent["label"])
                 if not sub_label:
+                    continue
+                if sub_text.lower() not in passage_ent_texts:
                     continue
                 if not re.search(r"\b" + re.escape(sub_text) + r"\b", text, re.IGNORECASE):
                     continue
@@ -362,7 +456,7 @@ class ContradictoryGenerator:
 
         result = fix_article(result, replacement)
         result = self.scrub_other_answers(result, answers, raws, replacement)
-        #reject repeated replacement artifact
+        #skip repeated replacement
         if (replacement + " " + replacement).lower() in result.lower():
             return text, False, None
         if re.search(re.escape(replacement) + r'\s*[;,/&]\s*' + re.escape(replacement), result, re.IGNORECASE):

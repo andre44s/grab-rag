@@ -10,6 +10,7 @@ models = {
     "qwen": {"repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF", "revision": '8911e8a47f92bac19d6f5c64a2e2095bd2f7d031', "type": "gguf"},
     "gliner": {"repo_id": "urchade/gliner_large-v2.1", "revision": "abd49a1f1ebc12af1be84d06f6848221cf96dcad", "type": "snapshot"},
     "bge": {"repo_id": "BAAI/bge-small-en-v1.5", "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", "type": "snapshot"},
+    "nli": {"repo_id": "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", "revision": "main", "type": "snapshot"},
 }
 
 def download_one(name, cfg, force=False):
