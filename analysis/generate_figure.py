@@ -15,14 +15,14 @@ fig_dir=results_dir / "figures"
 
 models = ["phi", "llama", "qwen"]
 datasets = ["nq", "hpqa"]
-policies = ["P0", "P1", "P2", "P3"]
+policies = ["P0", "P1", "P2", "P3", "P4"]
 cond_order = ["Q100", "Q50", "Q0", "QC"]
 
 mlabels = {"phi": "Phi-4-mini\n(3.8B)", "llama": "Llama-3.1-8B", "qwen": "Qwen2.5-7B"}
-plabels = {"P0": "P0 (none)", "P1": "P1 (IDK)", "P2": "P2 (CoT)", "P3": "P3 (conflict)"}
-pc = {"P0": "#999999", "P1": "#E69F00", "P2": "#56B4E9", "P3": "#009E73"}
-pls = {"P0": "--", "P1": "-", "P2": "-", "P3": ":"}
-pm = {"P0": "s", "P1": "o", "P2": "^", "P3": "D"}
+plabels = {"P0": "P0 (none)", "P1": "P1 (IDK)", "P2": "P2 (CoT)", "P3": "P3 (conflict)", "P4": "P4 (NLI)"}
+pc = {"P0": "#999999", "P1": "#E69F00", "P2": "#56B4E9", "P3": "#009E73", "P4": "#CC79A7"}
+pls = {"P0": "--", "P1": "-", "P2": "-", "P3": ":", "P4": "-."}
+pm = {"P0": "s", "P1": "o", "P2": "^", "P3": "D", "P4": "X"}
 
 rc = {
     "font.size": 10,
@@ -107,7 +107,7 @@ def fig1_abstention_cliff(rows):
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, loc="lower center", ncol=len(policies),
             bbox_to_anchor=(0.5, 0.0), frameon=False,
-            handlelength=2.2, columnspacing=2.0)
+            handlelength=2.2, columnspacing=1.5)
         fig.suptitle(
             "Abstention Rate by Context Condition  (shaded band = 95% CI; averaged NQ + HotpotQA)",
             fontsize=9, y=1.01,

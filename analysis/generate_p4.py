@@ -1,4 +1,4 @@
-import json, sys, time, random
+import argparse, json, sys, time, random
 from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -12,11 +12,10 @@ from src.context_quality import ContradictoryGenerator, build_condition
 from src.retrieval import Retriever
 from src.utils import exact_match, f1_score
 
-seed=42
 cf_thresh=50
 conditions=["Q100", "Q50", "Q0", "QC"]
 
-files = {
+default_files = {
     ("phi", "nq"): results_base / "phi-nq/phi_nq.jsonl",
     ("phi", "hpqa"): results_base / "phi-hpqa/phi_hpqa.jsonl",
     ("llama", "nq"): results_base / "llama-nq/llama_nq.jsonl",
@@ -102,7 +101,7 @@ def p4_decision(p1_row, cb_row, passages, question, tok, model, device):
         return 'abstain', '', 0, 'nli_contradiction', labels, prob_dicts
     return p1_row['decision'], p1_row['answer'], p1_row['confidence'], 'nli_clear', labels, prob_dicts
 
-def process_file(key, path, records, retriever, contra_gen, gold_answers, tok, nli_model, device):
+def process_file(key, path, records, retriever, contra_gen, gold_answers, tok, nli_model, device, seed=42):
     model_name, dataset=key
     if not path.exists():
         print(f"skip {path}: not found")
@@ -152,7 +151,7 @@ def process_file(key, path, records, retriever, contra_gen, gold_answers, tok, n
         #same passages and rng as runner.py
         cands=retriever.retrieve(question, top_k=80)
         hard_negs=retriever.hard_negatives(question, gold_passages, answers, candidates=cands)
-        rng=random.Random(seed + qi)
+        rng=random.Random(seed + qi)  #must match the seed used in runner.py
         try:
             passages=build_condition(
                 gold_passages=gold_passages,
@@ -210,6 +209,22 @@ def process_file(key, path, records, retriever, contra_gen, gold_answers, tok, n
     print(f"p1_abstain={n_p1_abstain}  cb_unsure={n_cb_unsure}  nli_contradiction={n_nli_contra}  nli_clear={n_nli_clear}  build_err={n_build_err}  qc_skip={n_qc_skip}")
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42,
+                        help="rng seed used when the result file was generated (default: 42)")
+    parser.add_argument("--input", type=str, default=None,
+                        help="path to a single result .jsonl to process instead of the default set")
+    args = parser.parse_args()
+
+    if args.input:
+        #infer model/dataset from the path or the rows themselves
+        p = Path(args.input)
+        with p.open(encoding="utf-8") as f:
+            first = json.loads(f.readline())
+        files = {(first["model"], first["dataset"]): p}
+    else:
+        files = default_files
+
     tok, nli_model, device=load_nli_model()
     #build retriever and generator once per dataset
     cache={}
@@ -223,8 +238,9 @@ def main():
             gold_answers={rec['id']: rec.get('answers', []) for rec in records}
             cache[dataset]=(records, retriever, contra_gen, gold_answers)
         tmp=cache[dataset]
-        print(f"processing {key[0]}+{dataset}")
-        process_file(key, path, tmp[0], tmp[1], tmp[2], tmp[3], tok, nli_model, device)
+        print(f"processing {key[0]}+{dataset} (seed={args.seed})")
+        process_file(key, path, tmp[0], tmp[1], tmp[2], tmp[3], tok, nli_model, device,
+                     seed=args.seed)
     print("done")
 
 if __name__ == "__main__":

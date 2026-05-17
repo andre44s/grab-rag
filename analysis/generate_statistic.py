@@ -377,7 +377,7 @@ def print_hwsa_robustness(hwsa_full, hwsa_filt, usable):
     all_str = "NO"
     if all_sign_ok:
         all_str = "YES"
-    print(f"all 24 delta signs preserved: {all_str}")
+    print(f"all 30 delta signs preserved: {all_str}")
 
 def print_tables_main(hwsa, fac, ans_rate, aurc_res, cmp):
     print("hwsa")
@@ -496,13 +496,23 @@ def qc_source_analysis(all_rows, eval_records):
                               f"{v['correct']/na*100:>8.1f}%  {v['echoed']/na*100:>8.1f}%  "
                               f"{v['hallucinated']/na*100:>8.1f}%")
 
+        print("\nqc answer source (per model, all policies)")
+        print(f"{'model':<14}  {'ans':>5}  {'echo%':>6}  {'halluc%':>8}  {'correct%':>9}")
         grand = defaultdict(int)
-        for v in counts.values():
-            for k, n in v.items():
-                grand[k] += n
+        for m in models:
+            mc = defaultdict(int)
+            for ds in datasets:
+                for pol in policies:
+                    for k, n in counts[(m, ds, pol)].items():
+                        mc[k] += n
+                        grand[k] += n
+            na = mc["answered"]
+            if na:
+                print(f"{mlabels[m]:<14}  {na:>5}  {mc['echoed']/na*100:>5.1f}%  "
+                      f"{mc['hallucinated']/na*100:>7.1f}%  {mc['correct']/na*100:>8.1f}%")
         na = grand["answered"]
-        print(f"all: {na} answers, correct={grand['correct']/na*100:.1f}%  "
-              f"echoed={grand['echoed']/na*100:.1f}%  hallucinated={grand['hallucinated']/na*100:.1f}%")
+        print(f"{'all':<14}  {na:>5}  {grand['echoed']/na*100:>5.1f}%  "
+              f"{grand['hallucinated']/na*100:>7.1f}%  {grand['correct']/na*100:>8.1f}%")
         return counts
 
     except (ImportError, RuntimeError) as e:
